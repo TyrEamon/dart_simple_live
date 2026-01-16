@@ -6,27 +6,75 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 40
 
-      - uses: actions/setup-java@v4
+    steps:
+      # 1) 拉代码（带完整历史+子模块，避免 git 依赖/子模块导致 pub get 卡住）
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      # 2) Java 17（Android 构建需要）
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
+          cache: "gradle"
 
-      - uses: subosito/flutter-action@v2
+      # 3) Flutter（按项目要求锁版本）
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.38.0"
           cache: true
 
-      - name: Build APK
-        working-directory: simple_live_app
-        run: |
-          flutter pub get
-          flutter build apk --debug
+      # 4) 打印环境诊断（出问题时一眼看懂）
+      - name: Flutter doctor
+        run: flutter doctor -v
 
-      - name: Upload artifact
+      # 5) 手机端：拉依赖（verbose + 重试，专治网络抽风/卡住）
+      - name: Pub get (app) - verbose with retry
+        working-directory: simple_live_app
+        shell: bash
+        run: |
+          set -e
+          flutter pub get --verbose || true
+          flutter pub get --verbose || true
+          flutter pub get --verbose
+
+      # 6) 手机端：打包 debug APK（免签名，下载就能装）
+      - name: Build APK (app) - debug
+        working-directory: simple_live_app
+        run: flutter build apk --debug
+
+      # 7) 上传手机端 APK
+      - name: Upload APK artifact (app)
         uses: actions/upload-artifact@v4
         with:
           name: simple_live_app-debug-apk
           path: simple_live_app/build/app/outputs/flutter-apk/app-debug.apk
+
+      # 8) TV 端：拉依赖（同样 verbose + 重试）
+      - name: Pub get (tv) - verbose with retry
+        working-directory: simple_live_tv_app
+        shell: bash
+        run: |
+          set -e
+          flutter pub get --verbose || true
+          flutter pub get --verbose || true
+          flutter pub get --verbose
+
+      # 9) TV 端：打包 debug APK
+      - name: Build APK (tv) - debug
+        working-directory: simple_live_tv_app
+        run: flutter build apk --debug
+
+      # 10) 上传 TV 端 APK
+      - name: Upload APK artifact (tv)
+        uses: actions/upload-artifact@v4
+        with:
+          name: simple_live_tv_app-debug-apk
+          path: simple_live_tv_app/build/app/outputs/flutter-apk/app-debug.apk
